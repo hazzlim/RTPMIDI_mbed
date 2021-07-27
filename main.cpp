@@ -6,6 +6,7 @@
 #include "mbed.h"
 #include "fxos8700cq.h"
 #include "EthernetInterface.h"
+#include "LWIPStack.h"
 
 #define I2C0_SDA PTD9
 #define I2C0_SCL PTD8
@@ -39,20 +40,22 @@ typedef struct {
     uint8_t unusedH;
     uint16_t unusedL;
     uint64_t timestamp1;
-    uint64_t timestamp2;
+    uint32_t timestamp2H;
+    uint32_t timestamp2L;
     uint64_t timestamp3;
 } __packed timestamp_packet;
 
 /* MIDI Message Packet */
 typedef struct {
-    uint32_t misc;
+    uint16_t vpxccmpt;
+    uint16_t seq;
     uint32_t timestamp;
     uint32_t sender_ssrc;
     uint8_t midi_header;
     uint8_t midi1;
     uint8_t midi2;
     uint8_t midi3;
-} message_packet;
+} __packed message_packet;
 
 
 int modulate(Data &values)
@@ -114,8 +117,9 @@ int main()
     timestamp_packet in_time;
     midi.recvfrom(&sockAddr, &in_time, sizeof(timestamp_packet));
 
-    auto now = Kernel::Clock::now();
-    auto timestamp2 = now.time_since_epoch().count();
+    auto start = Kernel::Clock::now();
+    uint32_t timestamp2 = (Kernel::Clock::now() - start).count() / 10;
+    timestamp2 = lwip_htonl(timestamp2);
 
     // send timestamp
     timestamp_packet out_time = {
@@ -128,24 +132,25 @@ int main()
         0,
         0,
         in_time.timestamp1,
+        0,
         timestamp2,
         0,
     };
-    printf("Size: %d\n", sizeof(out_time));
-    printf("Timestamp: %lu\n", in_time.timestamp1);
+    printf("Time: %d\n", timestamp2);
     midi.sendto(sockAddr, &out_time, sizeof(timestamp_packet));
 
     // receive sync message
     midi.recvfrom(&sockAddr, &in_time, sizeof(timestamp_packet));
 
     message_packet msg = {
-        0x4b00e180,
+        0x6180,
+        0x45fd,
         timestamp2,
         ssrc,
         0x03,
         0x90,
-        0x3d,
-        0x78
+        0x43,
+        0x7f
     };
 
     acc.init();
@@ -154,15 +159,27 @@ int main()
         // sync
         midi.recvfrom(&sockAddr, &in_time, sizeof(timestamp_packet));
         out_time.timestamp1 = in_time.timestamp1;
-        now = Kernel::Clock::now();
-        timestamp2 = now.time_since_epoch().count();
-        out_time.timestamp2 = timestamp2;
+        timestamp2 = (Kernel::Clock::now() - start).count() / 100;
+        timestamp2 = lwip_htonl(timestamp2);
+        out_time.timestamp2L = timestamp2;
         midi.sendto(sockAddr, &out_time, sizeof(timestamp_packet));
         // receive sync message
         midi.recvfrom(&sockAddr, &in_time, sizeof(timestamp_packet));
 
-        // send midi msg
-        msg.timestamp = in_time.timestamp3;
+        // send noteon
+        msg.seq += 0x100;
+        msg.midi1 = 0x90;
+        msg.timestamp = (Kernel::Clock::now() - start).count() / 100;
+        msg.timestamp = lwip_htonl(msg.timestamp);
+        midi.sendto(sockAddr, &msg, sizeof(message_packet));
+
+        ThisThread::sleep_for(100ms);
+
+        // send noteoff
+        msg.seq += 0x100;
+        msg.midi1 = 0x80;
+        msg.timestamp = (Kernel::Clock::now() - start).count() / 100;
+        msg.timestamp = lwip_htonl(msg.timestamp);
         midi.sendto(sockAddr, &msg, sizeof(message_packet));
 
         // poll the sensor and get the values, storing in a struct
