@@ -11,13 +11,21 @@ include(${MBED_PATH}/tools/cmake/app.cmake)
 
 add_subdirectory(${MBED_PATH})
 
+add_subdirectory(FXOS8700CQ)
+
 add_executable(${APP_TARGET}
     main.cpp
+    RTPMIDI.cpp
 )
 
 project(${APP_TARGET})
 
-target_link_libraries(${APP_TARGET} mbed-os)
+target_link_libraries(${APP_TARGET} mbed-os mbed-netsocket fxos8700cq-lib)
+
+target_include_directories(${APP_TARGET}
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/FXOS8700CQ
+)
 
 mbed_set_post_build(${APP_TARGET})
 
