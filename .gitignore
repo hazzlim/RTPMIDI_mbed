@@ -1,2 +1,3 @@
-.mbedbuild
+ .mbedbuild
 cmake_build/
+.swp
