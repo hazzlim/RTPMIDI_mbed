@@ -3,8 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "RTPMIDI.h"
 #include "mbed.h"
 #include "fxos8700cq.h"
+
+// TODO: Remove these includes:
 #include "EthernetInterface.h"
 #include "LWIPStack.h"
 
@@ -13,9 +16,6 @@
 
 /* Accelerometer Interface */
 FXOS8700CQ acc(I2C0_SDA, I2C0_SCL);
-
-/* Network Interface */
-EthernetInterface net;
 
 /* APPLEMIDI SIP Packet */
 typedef struct {
@@ -63,49 +63,45 @@ int modulate(Data &values)
     return (0x3FFF * (values.ax + 1)) / 2;
 }
 
-int main()
+int monolithic_rtp_midi(EthernetInterface *net)
 {
-    uint32_t ssrc = 0x2d5d5ff3;
-
     SocketAddress sockAddr;
     // Bring up the ethernet interface
     printf("UDP Socket example\n");
-    if (0 != net.connect()) {
+    if (0 != net->connect()) {
         printf("Error connecting\n");
         return -1;
     }
 
     // Show the network address
-    net.get_ip_address(&sockAddr);
+    net->get_ip_address(&sockAddr);
     printf("IP address is: %s\n", sockAddr.get_ip_address() ? sockAddr.get_ip_address() : "No IP");
 
     UDPSocket command;
     UDPSocket midi;
-    command.open(&net);
-    midi.open(&net);
+    /* open sockets */
+    command.open(net);
+    midi.open(net);
 
-    // Bind address to control socket
-    command.bind(5004);
-    apple_midi_packet in_data;
-    command.recvfrom(&sockAddr, &in_data, sizeof(apple_midi_packet));
+    // Bind sockets
+    command.bind(CONTROL_PORT);
+    midi.bind(MIDI_PORT);
+
+    exchange_packet in_data;
+    SocketAddress initiatorAddress;
+    command.recvfrom(&initiatorAddress, &in_data, sizeof(exchange_packet));
 
     // send ok
-    apple_midi_packet out_data = {
-         0xff,
-         0xff,
-         0x4f,
-         0x4b,
-         in_data.protocol_version,
+    exchange_packet out_data = {
+         EXCHANGE_SIGNATURE,
+         lwip_htons(ACCEPT_INV_COMMAND),
+         lwip_htonl(PROTOCOL_VERSION),
          in_data.initiator_token,
-         0x2d5d5ff3,
-         "k66f"
+         SSRC_NUMBER,
+         NAME
     };
-    sockAddr.set_ip_address("192.168.68.117");
-    sockAddr.set_port(5004);
-    command.sendto(sockAddr, &out_data, sizeof(apple_midi_packet));
+    command.sendto(initiatorAddress, &out_data, sizeof(exchange_packet));
 
-    // Bind address to MIDI socket
-    midi.bind(5005);
     midi.recvfrom(&sockAddr, &in_data, sizeof(apple_midi_packet));
 
     // send ok
@@ -146,7 +142,7 @@ int main()
         0x6180,
         0x45fd,
         timestamp2,
-        ssrc,
+        SSRC_NUMBER,
         0x03,
         0x90,
         0x43,
@@ -187,6 +183,13 @@ int main()
 
         // generate the bend value from the sensor values
         int bend = modulate(values);
-
     }
+}
+
+int main()
+{
+    RTPMIDI rtpMidi;
+    rtpMidi.participate();
+
+    while(1);
 }
