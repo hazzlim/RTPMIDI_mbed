@@ -15,6 +15,7 @@
 
 #include "RTPMIDI.h"
 #include "LWIPStack.h"
+#include "rtos.h"
 
 RTPMIDI::RTPMIDI() : _net(NetworkInterface::get_default_instance())
 {
@@ -99,5 +100,23 @@ void RTPMIDI::participate()
     _midi_socket.sendto(initiatorAddress, &setupResponse, sizeof(exchange_packet));
 
     printf("Response sent \r\n");
+
+    /* Receive Synchronisation CK0 */
+    timestamp_packet synch;
+    _midi_socket.recvfrom(&initiatorAddress, &synch, sizeof(timestamp_packet));
+
+    /* Send Synchronisation CK1 */
+    synch.sender_ssrc = SSRC_NUMBER;
+    synch.count = SYNC_CK1;
+    // network byte order
+    synch.timestamp[SYNC_CK1] = htonll(_calculate_current_timestamp());
+
+    _midi_socket.sendto(initiatorAddress, &synch, sizeof(exchange_packet));
+}
+
+uint64_t RTPMIDI::_calculate_current_timestamp()
+{
+    /* Get count from timepoint returned by now() and divide to give 100us */
+    return Kernel::Clock::now().time_since_epoch().count() / 10;
 }
 
