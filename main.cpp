@@ -43,7 +43,7 @@ typedef struct {
     uint32_t timestamp2H;
     uint32_t timestamp2L;
     uint64_t timestamp3;
-} __packed timestamp_packet;
+} __packed _timestamp_packet;
 
 /* MIDI Message Packet */
 typedef struct {
@@ -110,15 +110,15 @@ int monolithic_rtp_midi(EthernetInterface *net)
     midi.sendto(sockAddr, &out_data, sizeof(apple_midi_packet));
 
     // receive sync message
-    timestamp_packet in_time;
-    midi.recvfrom(&sockAddr, &in_time, sizeof(timestamp_packet));
+    _timestamp_packet in_time;
+    midi.recvfrom(&sockAddr, &in_time, sizeof(_timestamp_packet));
 
     auto start = Kernel::Clock::now();
     uint32_t timestamp2 = (Kernel::Clock::now() - start).count() / 10;
     timestamp2 = lwip_htonl(timestamp2);
 
     // send timestamp
-    timestamp_packet out_time = {
+    _timestamp_packet out_time = {
         0xff,
         0xff,
         0x43,
@@ -133,10 +133,10 @@ int monolithic_rtp_midi(EthernetInterface *net)
         0,
     };
     printf("Time: %d\n", timestamp2);
-    midi.sendto(sockAddr, &out_time, sizeof(timestamp_packet));
+    midi.sendto(sockAddr, &out_time, sizeof(_timestamp_packet));
 
     // receive sync message
-    midi.recvfrom(&sockAddr, &in_time, sizeof(timestamp_packet));
+    midi.recvfrom(&sockAddr, &in_time, sizeof(_timestamp_packet));
 
     message_packet msg = {
         0x6180,
@@ -153,14 +153,14 @@ int monolithic_rtp_midi(EthernetInterface *net)
 
     while (1) {
         // sync
-        midi.recvfrom(&sockAddr, &in_time, sizeof(timestamp_packet));
+        midi.recvfrom(&sockAddr, &in_time, sizeof(_timestamp_packet));
         out_time.timestamp1 = in_time.timestamp1;
         timestamp2 = (Kernel::Clock::now() - start).count() / 100;
         timestamp2 = lwip_htonl(timestamp2);
         out_time.timestamp2L = timestamp2;
-        midi.sendto(sockAddr, &out_time, sizeof(timestamp_packet));
+        midi.sendto(sockAddr, &out_time, sizeof(_timestamp_packet));
         // receive sync message
-        midi.recvfrom(&sockAddr, &in_time, sizeof(timestamp_packet));
+        midi.recvfrom(&sockAddr, &in_time, sizeof(_timestamp_packet));
 
         // send noteon
         msg.seq += 0x100;
