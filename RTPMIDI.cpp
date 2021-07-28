@@ -83,5 +83,21 @@ void RTPMIDI::participate()
     _control_socket.sendto(initiatorAddress, &setupResponse, sizeof(exchange_packet));
 
     printf("Response sent \r\n");
+
+    /* Try to receive Invitation Packet on midi port */
+    printf("Waiting for invitation...\r\n");
+
+    _midi_socket.recvfrom(&initiatorAddress, &setupInvitation, sizeof(exchange_packet));
+    if (setupInvitation.command != lwip_htons(INV_COMMAND)) {
+        printf("Error! Received: '%d' command, not 'IN' command.\r\n", setupInvitation.command);
+        return;
+    }
+
+    printf("invitation received from %s:%d... sending response... \r\n", initiatorAddress.get_ip_address(), initiatorAddress.get_port());
+
+    /* Send response packet on midi port */
+    _midi_socket.sendto(initiatorAddress, &setupResponse, sizeof(exchange_packet));
+
+    printf("Response sent \r\n");
 }
 
