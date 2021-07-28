@@ -17,8 +17,12 @@
 #define RTPMIDI_H
 
 #include <stdint.h>
+#include <deque>
 #include "NetworkInterface.h"
 #include "UDPSocket.h"
+
+// TODO: Include this header without having to include mbed-usb
+#include "MIDIMessage.h"
 
 #if BYTE_ORDER == LITTLE_ENDIAN
 #define htonll(x) ((((uint64_t)lwip_htonl(x)) << 32) + lwip_htonl((x) >> 32)) 
@@ -28,6 +32,9 @@
 #define MIDI_PORT       5005
 
 #define MAX_NAME_LENGTH 32
+
+// TODO: something that makes more sense than this
+#define MAX_BUFFER_SIZE MAX_MIDI_MESSAGE_SIZE
 
 #define EXCHANGE_SIGNATURE   0xFFFF
 #define INV_COMMAND          0x494E
@@ -64,6 +71,15 @@ typedef struct {
     uint64_t timestamp[3];
 } __packed timestamp_packet;
 
+/* MIDI Packet Header */
+typedef struct {
+    uint8_t vpxcc;
+    uint8_t mpayload;
+    uint16_t sequence_number;
+    uint32_t timestamp;
+    uint32_t sender_ssrc;
+} __packed midi_packet_header;
+
 class RTPMIDI {
 public:
 
@@ -87,12 +103,21 @@ public:
     */
     void participate();
 
+    /**
+    * Send a MIDIMessage
+    *
+    * @param msg The MIDIMessage to send
+    */
+    void write(MIDIMessage msg);
+
 private:
     NetworkInterface *_net;
     UDPSocket _control_socket;
     UDPSocket _midi_socket;
+    std::deque<uint8_t> _out_midi_buffer;
 
     uint64_t _calculate_current_timestamp();
+    void _send_midi_buffer();
 };
 
 #endif

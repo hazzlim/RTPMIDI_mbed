@@ -114,6 +114,21 @@ void RTPMIDI::participate()
     _midi_socket.sendto(initiatorAddress, &synch, sizeof(exchange_packet));
 }
 
+void RTPMIDI::write(MIDIMessage msg)
+{
+
+    /* Check if we need to clear the buffer */
+    if (_out_midi_buffer.size() + msg.length > MAX_BUFFER_SIZE) {
+        _send_midi_buffer();
+    }
+
+    /* First byte (CN) is ignored */
+    for (int i = 1; i < msg.length; ++i) {
+        _out_midi_buffer.push_back(msg.data[i]);
+    }
+
+}
+
 uint64_t RTPMIDI::_calculate_current_timestamp()
 {
     /* Get count from timepoint returned by now() and divide to give 100us */

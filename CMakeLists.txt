@@ -20,7 +20,12 @@ add_executable(${APP_TARGET}
 
 project(${APP_TARGET})
 
-target_link_libraries(${APP_TARGET} mbed-os mbed-netsocket fxos8700cq-lib)
+target_link_libraries(${APP_TARGET}
+    mbed-os
+    mbed-netsocket
+    fxos8700cq-lib
+    mbed-usb
+)
 
 target_include_directories(${APP_TARGET}
     PUBLIC
