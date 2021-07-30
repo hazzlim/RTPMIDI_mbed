@@ -16,13 +16,19 @@
 #include "RTPMIDI.h"
 #include "LWIPStack.h"
 #include "rtos.h"
+#include <chrono>
 
-RTPMIDI::RTPMIDI() : _net(NetworkInterface::get_default_instance())
+using namespace std::chrono_literals;
+
+RTPMIDI::RTPMIDI()
+    : _net(NetworkInterface::get_default_instance()), _rtp_queue(32 * EVENTS_EVENT_SIZE)
 {
+    _init();
 }
 
 RTPMIDI::RTPMIDI(NetworkInterface *net) : _net(net)
 {
+    _init();
 }
 
 RTPMIDI::~RTPMIDI()
@@ -31,7 +37,6 @@ RTPMIDI::~RTPMIDI()
         _net->disconnect();
     }
 }
-
 
 void RTPMIDI::participate()
 {
@@ -63,14 +68,13 @@ void RTPMIDI::participate()
     printf("Waiting for invitation...\r\n");
 
     exchange_packet setupInvitation;
-    SocketAddress initiatorAddress;
-    _control_socket.recvfrom(&initiatorAddress, &setupInvitation, sizeof(exchange_packet));
+    _control_socket.recvfrom(&_peer_address, &setupInvitation, sizeof(exchange_packet));
     if (setupInvitation.command != lwip_htons(INV_COMMAND)) {
         printf("Error! Received: '%d' command, not 'IN' command.\r\n", setupInvitation.command);
         return;
     }
 
-    printf("invitation received from %s:%d... sending response... \r\n", initiatorAddress.get_ip_address(), initiatorAddress.get_port());
+    printf("invitation received from %s:%d... sending response... \r\n", _peer_address.get_ip_address(), _peer_address.get_port());
 
     /* Send response packet on control port */
     exchange_packet setupResponse = {
@@ -81,51 +85,64 @@ void RTPMIDI::participate()
         SSRC_NUMBER,
         NAME
     };
-    _control_socket.sendto(initiatorAddress, &setupResponse, sizeof(exchange_packet));
+    _control_socket.sendto(_peer_address, &setupResponse, sizeof(exchange_packet));
 
     printf("Response sent \r\n");
 
     /* Try to receive Invitation Packet on midi port */
     printf("Waiting for invitation...\r\n");
 
-    _midi_socket.recvfrom(&initiatorAddress, &setupInvitation, sizeof(exchange_packet));
+    _midi_socket.recvfrom(&_peer_address, &setupInvitation, sizeof(exchange_packet));
     if (setupInvitation.command != lwip_htons(INV_COMMAND)) {
         printf("Error! Received: '%d' command, not 'IN' command.\r\n", setupInvitation.command);
         return;
     }
 
-    printf("invitation received from %s:%d... sending response... \r\n", initiatorAddress.get_ip_address(), initiatorAddress.get_port());
+    printf("invitation received from %s:%d... sending response... \r\n", _peer_address.get_ip_address(), _peer_address.get_port());
 
     /* Send response packet on midi port */
-    _midi_socket.sendto(initiatorAddress, &setupResponse, sizeof(exchange_packet));
+    _midi_socket.sendto(_peer_address, &setupResponse, sizeof(exchange_packet));
 
     printf("Response sent \r\n");
 
-    /* Receive Synchronisation CK0 */
-    timestamp_packet synch;
-    _midi_socket.recvfrom(&initiatorAddress, &synch, sizeof(timestamp_packet));
+    /* Set up synchronization */
+    Event<void()> sync_event = _rtp_queue.event(this, &RTPMIDI::_synchronise);
+    sync_event.period(50s);
+    sync_event.post();
+    printf("Size of EVENTS_EVENT_SIZE: %d\r\n", EVENTS_EVENT_SIZE);
+    printf("Size of sync func: %d\r\n", sizeof(sync_event));
+    _rtp_queue.dispatch_forever();
+    _rtp_thread.start(callback(&_rtp_queue, &EventQueue::dispatch_forever));
 
-    /* Send Synchronisation CK1 */
-    synch.sender_ssrc = SSRC_NUMBER;
-    synch.count = SYNC_CK1;
-    // network byte order
-    synch.timestamp[SYNC_CK1] = htonll(_calculate_current_timestamp());
-
-    _midi_socket.sendto(initiatorAddress, &synch, sizeof(exchange_packet));
 }
 
 void RTPMIDI::write(MIDIMessage msg)
 {
 
     /* Check if we need to clear the buffer */
-    if (_out_midi_buffer.size() + msg.length > MAX_BUFFER_SIZE) {
+    if (_out_buffer_size + msg.length > MaxPacketSize) {
         _send_midi_buffer();
     }
 
-    /* First byte (CN) is ignored */
+    /* Replace first byte (CN) with relative timestamp */
+    _out_buffer[_out_buffer_pos++] = 0x0;
     for (int i = 1; i < msg.length; ++i) {
-        _out_midi_buffer.push_back(msg.data[i]);
+        _out_buffer[_out_buffer_pos++] = msg.data[i];
+        _out_buffer_size++;
     }
+
+}
+
+void RTPMIDI::_init()
+{
+    /* Set up empty buffer - header lives at start */
+    _out_buffer_pos = _out_buffer_size = sizeof(midi_packet_header);
+
+    midi_packet_header *header_p = (midi_packet_header *) _out_buffer;
+    header_p->vpxcc = VPXCC;
+    header_p->mpayload = MPAYLOAD;
+    header_p->sequence_number = SEQ_NR;
+    header_p->sender_ssrc = SSRC_NUMBER;
 
 }
 
@@ -135,3 +152,25 @@ uint64_t RTPMIDI::_calculate_current_timestamp()
     return Kernel::Clock::now().time_since_epoch().count() / 10;
 }
 
+void RTPMIDI::_send_midi_buffer()
+{
+
+}
+
+void RTPMIDI::_synchronise()
+{
+        printf("Synch starting \r\n");
+        /* Receive Synchronisation CK0 */
+        timestamp_packet synch;
+        _midi_socket.recvfrom(&_peer_address, &synch, sizeof(timestamp_packet));
+
+        /* Send Synchronisation CK1 */
+        synch.sender_ssrc = SSRC_NUMBER;
+        synch.count = SYNC_CK1;
+        // network byte order
+        synch.timestamp[SYNC_CK1] = htonll(_calculate_current_timestamp());
+        _midi_socket.sendto(_peer_address, &synch, sizeof(exchange_packet));
+
+        /* Receive synchronisation CK2 */
+        _midi_socket.recvfrom(&_peer_address, &synch, sizeof(timestamp_packet));
+}

@@ -16,8 +16,9 @@
 #ifndef RTPMIDI_H
 #define RTPMIDI_H
 
+// TODO: Clean up includes
 #include <stdint.h>
-#include <deque>
+#include "mbed.h"
 #include "NetworkInterface.h"
 #include "UDPSocket.h"
 
@@ -25,16 +26,13 @@
 #include "MIDIMessage.h"
 
 #if BYTE_ORDER == LITTLE_ENDIAN
-#define htonll(x) ((((uint64_t)lwip_htonl(x)) << 32) + lwip_htonl((x) >> 32)) 
+#define htonll(x) ((((uint64_t)lwip_htonl(x)) << 32) + lwip_htonl((x) >> 32))
 #endif /* BYTE_ORDER == LITTLE_ENDIAN */
 
 #define CONTROL_PORT    5004
 #define MIDI_PORT       5005
 
 #define MAX_NAME_LENGTH 32
-
-// TODO: something that makes more sense than this
-#define MAX_BUFFER_SIZE MAX_MIDI_MESSAGE_SIZE
 
 #define EXCHANGE_SIGNATURE   0xFFFF
 #define INV_COMMAND          0x494E
@@ -46,6 +44,20 @@
 #define SYNC_CK0    0
 #define SYNC_CK1    1
 #define SYNC_CK2    2
+
+#define RTP_VERSION_SHIFT   6
+#define RTP_VERSION_2       2
+
+#define RTP_P_FIELD      0x20
+#define RTP_X_FIELD      0x10
+#define RTP_CC_FIELD     0xF
+#define RTP_M_FIELD      0x80
+#define RTP_PAYLOAD_TYPE 0x61
+
+/* Header Defaults */
+#define VPXCC       (RTP_VERSION_2 << RTP_VERSION_SHIFT) & ~RTP_P_FIELD & ~RTP_X_FIELD & ~ RTP_CC_FIELD
+#define MPAYLOAD    ~RTP_M_FIELD & RTP_PAYLOAD_TYPE
+#define SEQ_NR      1
 
 /* TODO: Generate these somehow, rather than defining them */
 #define SSRC_NUMBER          0x2d5d5ff3
@@ -103,6 +115,7 @@ public:
     */
     void participate();
 
+
     /**
     * Send a MIDIMessage
     *
@@ -111,13 +124,39 @@ public:
     void write(MIDIMessage msg);
 
 private:
+    static const uint32_t MaxPacketSize = sizeof(midi_packet_header) + MAX_MIDI_MESSAGE_SIZE;
+
+    uint8_t _out_buffer[MaxPacketSize];
+    uint32_t _out_buffer_pos;
+    uint32_t _out_buffer_size;
+
     NetworkInterface *_net;
     UDPSocket _control_socket;
     UDPSocket _midi_socket;
-    std::deque<uint8_t> _out_midi_buffer;
+    SocketAddress _peer_address;
 
+    Thread _rtp_thread;
+    EventQueue _rtp_queue;
+
+    /**
+     * Perform Initialisation steps
+     */
+    void _init();
+
+    /**
+     * Get the current timestamp
+     */
     uint64_t _calculate_current_timestamp();
+
+    /**
+     * Send and clear the buffer
+     */
     void _send_midi_buffer();
+
+    /**
+     * Perform synchronisation handshake
+     */
+    void _synchronise();
 };
 
 #endif

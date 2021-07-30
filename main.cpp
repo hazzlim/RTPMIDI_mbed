@@ -190,6 +190,4 @@ int main()
 {
     RTPMIDI rtpMidi;
     rtpMidi.participate();
-
-    while(1);
 }
